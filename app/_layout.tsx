@@ -7,33 +7,38 @@ import {
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 
-export default function RootLayout() {
-  const segments = useSegments();
+export function useAuthRedirect(isAuth: boolean) {
   const router = useRouter();
+  const segments = useSegments();
   const navigationState = useRootNavigationState();
-
-  const [isNavigationReady, setNavigationReady] = useState(false);
-  const isAuth = false;
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    if (!isNavigationReady && navigationState?.key) {
-      setNavigationReady(true);
-    }
-  }, [navigationState?.key, isNavigationReady]);
+    // Wait for navigation to be fully ready
+    if (!navigationState?.key) return;
+    setIsReady(true);
+  }, [navigationState?.key]);
 
   useEffect(() => {
-    if (!isNavigationReady) return;
+    if (!isReady) return;
 
-    const inAuthGroup = segments[0] === "(tabs)" || segments[0] === "auth";
+    const inAuthGroup = segments[0] === "auth";
 
     if (!isAuth && !inAuthGroup) {
       router.replace("/auth");
     } else if (isAuth && inAuthGroup) {
       router.replace("/(tabs)");
     }
-  }, [isNavigationReady, router, segments, isAuth]);
+  }, [isReady, isAuth, segments, router]);
+}
 
-  if (!isNavigationReady) {
+export default function RootLayout() {
+  const isAuth = false;
+  const navigationState = useRootNavigationState();
+
+  useAuthRedirect(isAuth);
+
+  if (!navigationState?.key) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" />
@@ -44,6 +49,7 @@ export default function RootLayout() {
   return (
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="auth" options={{ headerShown: true }} />
     </Stack>
   );
 }
