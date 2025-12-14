@@ -1,44 +1,41 @@
+import { AuthProvider, useAuth } from "@/lib/authContext";
 import {
   Stack,
   useRootNavigationState,
   useRouter,
   useSegments,
 } from "expo-router";
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
+import { Models } from "react-native-appwrite";
 
-export function useAuthRedirect(isAuth: boolean) {
+export const useAuthRedirect = (
+  isAuth: Models.User<Models.Preferences> | null,
+  isLoading: boolean,
+) => {
   const router = useRouter();
   const segments = useSegments();
-  const navigationState = useRootNavigationState();
-  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    // Wait for navigation to be fully ready
-    if (!navigationState?.key) return;
-    setIsReady(true);
-  }, [navigationState?.key]);
-
-  useEffect(() => {
-    if (!isReady) return;
+    if (isLoading) return;
 
     const inAuthGroup = segments[0] === "auth";
 
     if (!isAuth && !inAuthGroup) {
       router.replace("/auth");
     } else if (isAuth && inAuthGroup) {
-      router.replace("/(tabs)");
+      router.replace("/");
     }
-  }, [isReady, isAuth, segments, router]);
-}
+  }, [isLoading, isAuth, segments, router]);
+};
 
-export default function RootLayout() {
-  const isAuth = false;
+export const RootLayoutNav = () => {
+  const { user, isLoadingUser } = useAuth();
   const navigationState = useRootNavigationState();
 
-  useAuthRedirect(isAuth);
+  useAuthRedirect(user, isLoadingUser);
 
-  if (!navigationState?.key) {
+  if (!navigationState?.key || isLoadingUser) {
     return (
       <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
         <ActivityIndicator size="large" />
@@ -51,5 +48,13 @@ export default function RootLayout() {
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="auth" options={{ headerShown: true }} />
     </Stack>
+  );
+};
+
+export default function RootLayout() {
+  return (
+    <AuthProvider>
+      <RootLayoutNav />
+    </AuthProvider>
   );
 }
