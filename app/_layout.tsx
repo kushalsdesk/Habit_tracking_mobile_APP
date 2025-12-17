@@ -8,6 +8,8 @@ import {
 import React, { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { Models } from "react-native-appwrite";
+import { PaperProvider } from "react-native-paper";
+import { SafeAreaProvider } from "react-native-safe-area-context";
 
 export const useAuthRedirect = (
   isAuth: Models.User<Models.Preferences> | null,
@@ -54,7 +56,9 @@ export const RootLayoutNav = () => {
 export default function RootLayout() {
   return (
     <AuthProvider>
-      <RootLayoutNav />
+      <SafeAreaProvider>
+        <RootLayoutNav />
+      </SafeAreaProvider>
     </AuthProvider>
   );
 }
