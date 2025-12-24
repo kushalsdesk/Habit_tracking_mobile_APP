@@ -9,41 +9,64 @@ import { useAuth } from "@/lib/authContext";
 import { Habit } from "@/types/database.type";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import { useEffect, useState } from "react";
-import { Platform, StyleSheet, View } from "react-native";
+import { Platform, StyleSheet, View, ScrollView } from "react-native";
 import { Query } from "react-native-appwrite";
 import { Button, Surface, Text } from "react-native-paper";
 
 export default function Index() {
   const { signOut, user } = useAuth();
-
-  const [habits, setHabits] = useState<Habit[]>();
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
-    if (user?.$id) {
-      fetchHabits();
-    }
-    const habitSub = client.subscribe(
-      `databases.${DATABASE_ID}.collections.${COLLECTION_ID}.documents`,
-      (resp: RealtimeResponse) => {},
-    );
+    if (!user?.$id) return;
+
+    fetchHabits();
+
+    const channel = `databases.${DATABASE_ID}.collections.${COLLECTION_ID}.documents`;
+
+    const unsubscribe = client.subscribe(channel, (resp: RealtimeResponse) => {
+      const hasCreate = resp.events.includes(
+        "databases.*.collections.*.documents.*.create",
+      );
+      const hasUpdate = resp.events.includes(
+        "databases.*.collections.*.documents.*.update",
+      );
+      const hasDelete = resp.events.includes(
+        "databases.*.collections.*.documents.*.delete",
+      );
+
+      if (hasCreate || hasUpdate || hasDelete) {
+        fetchHabits();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
   }, [user?.$id]);
 
   const fetchHabits = async () => {
     if (!user?.$id) return;
+
+    setIsLoading(true);
     try {
       const resp = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
-        Query.equal("user_ID", user?.$id ?? ""),
+        Query.equal("user_ID", user.$id),
       ]);
       setHabits(resp.documents as Habit[]);
     } catch (err) {
-      console.error(err);
+      console.error("Error fetching habits:", err);
+    } finally {
+      setIsLoading(false);
     }
   };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text variant="headlineSmall" style={styles.title}>
-          Todays Habit
+          Todays Habits
         </Text>
 
         <Button
@@ -56,37 +79,46 @@ export default function Index() {
         </Button>
       </View>
 
-      {habits?.length === 0 ? (
+      {isLoading ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>Loading habits...</Text>
+        </View>
+      ) : habits.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>No Habits Yet.</Text>
+          <Text style={styles.emptyStateSubtext}>
+            Tap the + button to create your first habit!
+          </Text>
         </View>
       ) : (
-        habits?.map((habit, key) => (
-          <Surface key={habit.$id} style={styles.card} elevation={4}>
-            <View style={styles.cardContent}>
-              <Text style={styles.cardTitle}>{habit.title}</Text>
-              <Text style={styles.cardDesc}>{habit.description}</Text>
-              <View style={styles.cardFooter}>
-                <View style={styles.streakBadge}>
-                  <MaterialCommunityIcons
-                    name="fire"
-                    size={18}
-                    color={"#ff9800"}
-                  />
-                  <Text style={styles.streakText}>
-                    {habit.streak_count} day streak
-                  </Text>
-                </View>
-                <View style={styles.freqBadge}>
-                  <Text style={styles.freqText}>
-                    {habit.frequency.charAt(0).toUpperCase() +
-                      habit.frequency.slice(1)}
-                  </Text>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {habits.map((habit) => (
+            <Surface key={habit.$id} style={styles.card} elevation={0}>
+              <View style={styles.cardContent}>
+                <Text style={styles.cardTitle}>{habit.title}</Text>
+                <Text style={styles.cardDesc}>{habit.description}</Text>
+                <View style={styles.cardFooter}>
+                  <View style={styles.streakBadge}>
+                    <MaterialCommunityIcons
+                      name="fire"
+                      size={18}
+                      color={"#ff9800"}
+                    />
+                    <Text style={styles.streakText}>
+                      {habit.streak_count} day streak
+                    </Text>
+                  </View>
+                  <View style={styles.freqBadge}>
+                    <Text style={styles.freqText}>
+                      {habit.frequency.charAt(0).toUpperCase() +
+                        habit.frequency.slice(1)}
+                    </Text>
+                  </View>
                 </View>
               </View>
-            </View>
-          </Surface>
-        ))
+            </Surface>
+          ))}
+        </ScrollView>
       )}
     </View>
   );
@@ -114,12 +146,16 @@ const styles = StyleSheet.create({
     ...Platform.select({
       ios: {
         shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.12,
+        shadowRadius: 3,
       },
-      android: {},
+      android: {
+        shadowColor: "#000",
+      },
     }),
+    borderBottomWidth: Platform.OS === "android" ? 4 : 0,
+    borderBottomColor: "rgba(0,0,0,0.08)",
   },
   cardContent: {
     padding: 20,
@@ -173,5 +209,11 @@ const styles = StyleSheet.create({
   },
   emptyStateText: {
     color: "#666666",
+    fontSize: 16,
+    marginBottom: 8,
+  },
+  emptyStateSubtext: {
+    color: "#999999",
+    fontSize: 14,
   },
 });
