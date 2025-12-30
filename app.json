@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "finflow_mobile_APP",
-    "slug": "finflow_mobile_APP",
+    "name": "habit_tracking_app",
+    "slug": "habit_tracking_app",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "finflowmobileapp",
+    "scheme": "habittrackingmobileapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {

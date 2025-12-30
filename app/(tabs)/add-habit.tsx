@@ -1,4 +1,4 @@
-import { COLLECTION_ID, DATABASE_ID, databases } from "@/lib/appwrite";
+import { HABITS_COLLECTION_ID, DATABASE_ID, databases } from "@/lib/appwrite";
 import { useAuth } from "@/lib/authContext";
 import { useRouter } from "expo-router";
 import { useState } from "react";
@@ -40,14 +40,19 @@ const AddHabitScreen = () => {
     setIsLoading(true);
 
     try {
-      await databases.createDocument(DATABASE_ID, COLLECTION_ID, ID.unique(), {
-        user_ID: user.$id,
-        title: title.trim(),
-        description: description.trim(),
-        frequency: freq,
-        streak_count: 0,
-        last_completed: "",
-      });
+      await databases.createDocument(
+        DATABASE_ID,
+        HABITS_COLLECTION_ID,
+        ID.unique(),
+        {
+          user_ID: user.$id,
+          title: title.trim(),
+          description: description.trim(),
+          frequency: freq,
+          streak_count: 0,
+          last_completed: "",
+        },
+      );
 
       setTitle("");
       setDesc("");
