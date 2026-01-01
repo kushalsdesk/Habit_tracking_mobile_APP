@@ -6,7 +6,7 @@ import {
   useSegments,
 } from "expo-router";
 import React, { useEffect } from "react";
-import { ActivityIndicator, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import { Models } from "react-native-appwrite";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -36,19 +36,32 @@ export const RootLayoutNav = () => {
   const navigationState = useRootNavigationState();
 
   useAuthRedirect(user, isLoadingUser);
+  const isLoading = !navigationState?.key || isLoadingUser;
 
-  if (!navigationState?.key || isLoadingUser) {
+  if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center" }}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" />
       </View>
     );
   }
 
   return (
-    <Stack>
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="auth" options={{ headerShown: false }} />
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen
+        name="(tabs)"
+        options={{
+          headerShown: false,
+          animation: "fade",
+        }}
+      />
+      <Stack.Screen
+        name="auth"
+        options={{
+          headerShown: false,
+          animation: "fade",
+        }}
+      />
     </Stack>
   );
 };
@@ -64,3 +77,14 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f5f5f5",
+  },
+});

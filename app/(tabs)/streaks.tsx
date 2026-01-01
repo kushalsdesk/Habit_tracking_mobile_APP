@@ -1,361 +1,434 @@
 import {
   DATABASE_ID,
-  HABITS_COLLECTION_ID,
-  HABITS_COMPLETIONS_ID,
+  COLLECTION_ID,
+  COMPLETIONS_COLLECTION_ID,
   RealtimeResponse,
   client,
   databases,
+  getRealtimeChannel,
+  hasChangeEvent,
+  isCreateEvent,
 } from "@/lib/appwrite";
 import { useAuth } from "@/lib/authContext";
-import { Habit, HabitCompletion, StreakData } from "@/types/database.type";
-import { useState, useEffect } from "react";
+import { Habit, HabitCompletion, calculateStreak } from "@/types/database.type";
+import { useState, useEffect, useCallback } from "react";
 import { View, StyleSheet } from "react-native";
 import { Query } from "react-native-appwrite";
 import { ScrollView } from "react-native-gesture-handler";
-import { Card, Text } from "react-native-paper";
+import { Card, Text, ActivityIndicator } from "react-native-paper";
+import { MaterialCommunityIcons } from "@expo/vector-icons";
+
+interface HabitWithStats extends Habit {
+  currentStreak: number;
+  longestStreak: number;
+  totalCompletions: number;
+}
 
 const StreaksScreen = () => {
   const { user } = useAuth();
   const [habits, setHabits] = useState<Habit[]>([]);
-  const [completedHabits, setCompletedHabits] = useState<HabitCompletion[]>([]);
+  const [completions, setCompletions] = useState<HabitCompletion[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const [isLoading, setIsLoading] = useState(false);
+  const fetchHabits = useCallback(async () => {
+    if (!user?.$id) return;
+
+    try {
+      const resp = await databases.listDocuments(DATABASE_ID, COLLECTION_ID, [
+        Query.equal("user_ID", user.$id),
+      ]);
+      setHabits(resp.documents as Habit[]);
+    } catch (err) {
+      console.error("❌ Error fetching habits:", err);
+    }
+  }, [user?.$id]);
+
+  const fetchCompletions = useCallback(async () => {
+    if (!user?.$id) return;
+
+    try {
+      const resp = await databases.listDocuments(
+        DATABASE_ID,
+        COMPLETIONS_COLLECTION_ID,
+        [
+          Query.equal("user_ID", user.$id),
+          Query.orderDesc("completed_at"), // ✅ Get most recent first
+          Query.limit(1000), // Fetch more for accurate calculations
+        ],
+      );
+      setCompletions(resp.documents as HabitCompletion[]);
+    } catch (err) {
+      console.error("❌ Error fetching completions:", err);
+    }
+  }, [user?.$id]);
 
   useEffect(() => {
     if (!user?.$id) return;
 
-    const habits_channel = `databases.${DATABASE_ID}.collections.${HABITS_COLLECTION_ID}.documents`;
-    const completions_channel = `databases.${DATABASE_ID}.collections.${HABITS_COMPLETIONS_ID}.documents`;
+    const loadData = async () => {
+      setIsLoading(true);
+      await Promise.all([fetchHabits(), fetchCompletions()]);
+      setIsLoading(false);
+    };
 
-    const habits_unsubscribe = client.subscribe(
-      habits_channel,
+    loadData();
+
+    // Set up realtime subscriptions
+    const habitsChannel = getRealtimeChannel(COLLECTION_ID);
+    const completionsChannel = getRealtimeChannel(COMPLETIONS_COLLECTION_ID);
+
+    const habitsUnsubscribe = client.subscribe(
+      habitsChannel,
       (resp: RealtimeResponse) => {
-        const hasCreate = resp.events.includes(
-          "databases.*.collections.*.documents.*.create",
-        );
-        const hasUpdate = resp.events.includes(
-          "databases.*.collections.*.documents.*.update",
-        );
-        const hasDelete = resp.events.includes(
-          "databases.*.collections.*.documents.*.delete",
-        );
-
-        if (hasCreate || hasUpdate || hasDelete) {
+        if (hasChangeEvent(resp.events)) {
           fetchHabits();
         }
       },
     );
 
-    const completions_unsubscribe = client.subscribe(
-      completions_channel,
+    const completionsUnsubscribe = client.subscribe(
+      completionsChannel,
       (resp: RealtimeResponse) => {
-        const hasCreate = resp.events.includes(
-          "databases.*.collections.*.documents.*.create",
-        );
-
-        if (hasCreate) {
+        if (isCreateEvent(resp.events)) {
           fetchCompletions();
         }
       },
     );
 
-    fetchHabits();
-    fetchCompletions();
     return () => {
-      habits_unsubscribe();
-      completions_unsubscribe();
+      habitsUnsubscribe();
+      completionsUnsubscribe();
     };
-  }, [user?.$id]);
+  }, [user?.$id, fetchHabits, fetchCompletions]);
 
-  const fetchHabits = async () => {
-    if (!user?.$id) return;
+  const habitStats: HabitWithStats[] = habits.map((habit) => {
+    const habitCompletions = completions.filter(
+      (c) => c.habit_ID === habit.$id,
+    );
 
-    setIsLoading(true);
-    try {
-      const resp = await databases.listDocuments(
-        DATABASE_ID,
-        HABITS_COLLECTION_ID,
-        [Query.equal("user_ID", user.$id)],
-      );
-      setHabits(resp.documents as Habit[]);
-    } catch (err) {
-      console.error("Error fetching habits:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const fetchCompletions = async () => {
-    if (!user?.$id) return;
-
-    setIsLoading(true);
-    try {
-      const resp = await databases.listDocuments(
-        DATABASE_ID,
-        HABITS_COMPLETIONS_ID,
-        [Query.equal("user_ID", user.$id ?? "")],
-      );
-      const completedHabits = resp.documents as HabitCompletion[];
-      setCompletedHabits(completedHabits);
-    } catch (err) {
-      console.error("Error fetching habits:", err);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const getStreakData = (habit_ID: string): StreakData => {
-    const habitCompleted = completedHabits
-      ?.filter((ch) => ch.habit_ID === habit_ID)
-      .sort(
-        (a, b) =>
-          new Date(a.completed_at).getTime() -
-          new Date(b.completed_at).getTime(),
-      );
-
-    if (habitCompleted?.length === 0) {
-      return { streak: 0, bestStreak: 0, total: 0 };
-    }
-
-    let streak: number = 0,
-      bestStreak: number = 0,
-      total: number = habitCompleted.length;
-    let lastDate: Date | null = null,
-      currentStreak: number = 0;
-
-    habitCompleted?.forEach((ch) => {
-      const date = new Date(ch.completed_at);
-      if (lastDate) {
-        const diff =
-          (date.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
-        if (diff <= 1.5) {
-          currentStreak += 1;
-        } else {
-          currentStreak = 1;
-        }
-      } else {
-        currentStreak = 1;
-      }
-
-      if (currentStreak > bestStreak) bestStreak = currentStreak;
-      streak = currentStreak;
-      lastDate = date;
-    });
+    const stats = calculateStreak(habitCompletions);
 
     return {
-      streak,
-      bestStreak,
-      total,
+      ...habit,
+      currentStreak: stats.currentStreak,
+      longestStreak: stats.longestStreak,
+      totalCompletions: stats.totalCompletions,
     };
-  };
-
-  const habitStreaks = habits.map((habit) => {
-    const { streak, bestStreak, total } = getStreakData(habit.$id);
-    return { habit, bestStreak, streak, total };
   });
-  const rankedHabits = habitStreaks.sort((a, b) => b.bestStreak - a.bestStreak);
-  const badgeStyles = [styles.badge1, styles.badge2, styles.badge3];
+
+  const rankedHabits = [...habitStats].sort(
+    (a, b) => b.longestStreak - a.longestStreak,
+  );
+
+  const topThree = rankedHabits.slice(0, 3);
+  const badgeColors = ["#ffd700", "#c0c0c0", "#cd7f32"]; // Gold, Silver, Bronze
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#6200ee" />
+        <Text style={styles.loadingText}>Loading streak data...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Habits Streaks</Text>
-      {rankedHabits.length > 0 && (
-        <View style={styles.rankingContainer}>
-          <Text style={styles.rankingTitle}> Top Streaks</Text>
-          {rankedHabits.slice(0, 3).map((item, key) => (
-            <View key={key} style={styles.rankingRow}>
-              <View style={[styles.rankingBadge, badgeStyles[key]]}>
-                <Text style={styles.rankingBadgeText}>{key + 1}</Text>
-              </View>
-              <Text style={styles.rankingHabit}>{item.habit.title}</Text>
-              <Text style={styles.rankingBestStreak}>{item.bestStreak}</Text>
-            </View>
-          ))}
-        </View>
-      )}
       {habits.length === 0 ? (
-        <View>
-          <Text> No habits yet. Add your first Habit!</Text>
+        <View style={styles.emptyState}>
+          <MaterialCommunityIcons name="chart-line" size={64} color="#ccc" />
+          <Text style={styles.emptyText}>No Habits Yet</Text>
+          <Text style={styles.emptySubtext}>
+            Create your first habit to start tracking streaks!
+          </Text>
         </View>
       ) : (
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          style={styles.container}
-        >
-          {rankedHabits.map(({ habit, streak, bestStreak, total }, key) => (
-            <Card
-              key={key}
-              style={[styles.card, key === 0 && styles.firstCard]}
-            >
-              <Card.Content>
-                <Text variant="titleMedium" style={styles.habitTitle}>
-                  {habit.title}
-                </Text>
-                <Text style={styles.habitDesc}>{habit.description}</Text>
-                <View style={styles.statsRow}>
-                  <View style={styles.statsBadge}>
-                    <Text style={styles.statsText}>🔥 {streak}</Text>
-                    <Text style={styles.statsLabel}>Current</Text>
+        <>
+          {/* Top 3 Podium */}
+          {topThree.length > 0 && (
+            <View style={styles.podiumContainer}>
+              <Text style={styles.podiumTitle}>🏆 Top Performers</Text>
+              {topThree.map((item, index) => (
+                <View key={item.$id} style={styles.podiumRow}>
+                  <View
+                    style={[
+                      styles.podiumBadge,
+                      { backgroundColor: badgeColors[index] },
+                    ]}
+                  >
+                    <Text style={styles.podiumRank}>{index + 1}</Text>
                   </View>
-
-                  <View style={styles.statsBadgeGold}>
-                    <Text style={styles.statsText}>🏆{bestStreak}</Text>
-                    <Text style={styles.statsLabel}>Best</Text>
-                  </View>
-
-                  <View style={styles.statsBadgeGreen}>
-                    <Text style={styles.statsText}>✅{total}</Text>
-                    <Text style={styles.statsLabel}>Total</Text>
+                  <Text style={styles.podiumHabit} numberOfLines={1}>
+                    {item.title}
+                  </Text>
+                  <View style={styles.podiumStreak}>
+                    <MaterialCommunityIcons
+                      name="fire"
+                      size={16}
+                      color="#ff9800"
+                    />
+                    <Text style={styles.podiumStreakText}>
+                      {item.longestStreak}
+                    </Text>
                   </View>
                 </View>
-              </Card.Content>
-            </Card>
-          ))}
-        </ScrollView>
+              ))}
+            </View>
+          )}
+
+          {/* All Habits List */}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.scrollContent}
+          >
+            {rankedHabits.map((habit, index) => (
+              <Card
+                key={habit.$id}
+                style={[styles.card, index === 0 && styles.firstCard]}
+              >
+                <Card.Content>
+                  <View style={styles.habitHeader}>
+                    <Text variant="titleMedium" style={styles.habitTitle}>
+                      {habit.title}
+                    </Text>
+                    {index < 3 && (
+                      <View
+                        style={[
+                          styles.rankBadge,
+                          { backgroundColor: badgeColors[index] },
+                        ]}
+                      >
+                        <Text style={styles.rankText}>#{index + 1}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.habitDesc} numberOfLines={2}>
+                    {habit.description}
+                  </Text>
+
+                  <View style={styles.statsRow}>
+                    <View style={styles.statsBadge}>
+                      <MaterialCommunityIcons
+                        name="fire"
+                        size={20}
+                        color="#ff9800"
+                      />
+                      <Text style={styles.statsNumber}>
+                        {habit.currentStreak}
+                      </Text>
+                      <Text style={styles.statsLabel}>Current</Text>
+                    </View>
+
+                    <View style={styles.statsBadgeGold}>
+                      <MaterialCommunityIcons
+                        name="trophy"
+                        size={20}
+                        color="#ffc107"
+                      />
+                      <Text style={styles.statsNumber}>
+                        {habit.longestStreak}
+                      </Text>
+                      <Text style={styles.statsLabel}>Best</Text>
+                    </View>
+
+                    <View style={styles.statsBadgeGreen}>
+                      <MaterialCommunityIcons
+                        name="check-all"
+                        size={20}
+                        color="#4caf50"
+                      />
+                      <Text style={styles.statsNumber}>
+                        {habit.totalCompletions}
+                      </Text>
+                      <Text style={styles.statsLabel}>Total</Text>
+                    </View>
+                  </View>
+                </Card.Content>
+              </Card>
+            ))}
+          </ScrollView>
+        </>
       )}
     </View>
   );
 };
 
+export default StreaksScreen;
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5f5f5",
+    backgroundColor: "#f5f5f5",
     padding: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "#f5f5f5",
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#666",
   },
   title: {
     fontWeight: "bold",
-    marginBottom: 16,
+    marginBottom: 20,
   },
-
-  card: {
-    marginBottom: 18,
-    borderRadius: 18,
-    backgroundColor: "#fff",
-    elevation: 3,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    borderWidth: 1,
-    borderColor: "f0f0f0",
+  emptyState: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  firstCard: {
-    borderWidth: 2,
-    borderColor: "#7c4dff",
-  },
-  habitTitle: {
-    fontWeight: "bold",
+  emptyText: {
     fontSize: 18,
-    marginBottom: 2,
-  },
-  habitDesc: {
-    color: "#6c6c80",
+    fontWeight: "600",
+    color: "#666",
+    marginTop: 16,
     marginBottom: 8,
   },
-  statsRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginBottom: 12,
-    marginTop: 8,
+  emptySubtext: {
+    fontSize: 14,
+    color: "#999",
+    textAlign: "center",
   },
-  statsBadge: {
-    backgroundColor: "#fff3e0",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    alignItems: "center",
-    minWidth: 60,
-  },
-
-  statsBadgeGold: {
-    backgroundColor: "#fffde7",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    alignItems: "center",
-    minWidth: 60,
-  },
-
-  statsBadgeGreen: {
-    backgroundColor: "#e8f5e9",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    alignItems: "center",
-    minWidth: 60,
-  },
-  statsText: {
-    fontWeight: "bold",
-    fontSize: 15,
-    color: "#22223b",
-  },
-  statsLabel: {
-    fontSize: 11,
-    color: "#888",
-    marginTop: 2,
-    fontWeight: "500",
-  },
-  rankingContainer: {
+  podiumContainer: {
     marginBottom: 24,
-    backgroundColor: "#FFF",
-    borderRadius: 10,
+    backgroundColor: "#fff",
+    borderRadius: 16,
     padding: 16,
+    elevation: 2,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+  },
+  podiumTitle: {
+    fontWeight: "bold",
+    fontSize: 18,
+    marginBottom: 16,
+    color: "#6200ee",
+  },
+  podiumRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#f0f0f0",
+  },
+  podiumBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 12,
+  },
+  podiumRank: {
+    fontWeight: "bold",
+    color: "#fff",
+    fontSize: 16,
+  },
+  podiumHabit: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#333",
+  },
+  podiumStreak: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  podiumStreakText: {
+    fontSize: 16,
+    fontWeight: "bold",
+    color: "#ff9800",
+  },
+  scrollContent: {
+    paddingBottom: 20,
+  },
+  card: {
+    marginBottom: 16,
+    borderRadius: 16,
+    backgroundColor: "#fff",
     elevation: 2,
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 8,
   },
-  rankingTitle: {
-    fontWeight: "bold",
-    fontSize: 18,
-    marginBottom: 12,
-    color: "#7c4dff",
-    letterSpacing: 0.5,
+  firstCard: {
+    borderWidth: 2,
+    borderColor: "#6200ee",
+    elevation: 4,
   },
-  rankingRow: {
+  habitHeader: {
     flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
     marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#f0f0f0",
-    paddingBottom: 8,
   },
-  rankingBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-    backgroundColor: "#e0e0e0",
-  },
-  badge1: {
-    backgroundColor: "#ffd700",
-  },
-  badge2: {
-    backgroundColor: "#c0c0c0",
-  },
-  badge3: {
-    backgroundColor: "#cd7f32",
-  },
-  rankingBadgeText: {
+  habitTitle: {
     fontWeight: "bold",
-    color: "fff",
-    fontSize: 15,
-  },
-  rankingHabit: {
+    fontSize: 18,
     flex: 1,
-    fontSize: 15,
-    color: "#333",
-    fontWeight: 600,
+    color: "#22223b",
   },
-  rankingBestStreak: {
-    fontSize: 14,
-    color: "#7c4dff",
+  rankBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  rankText: {
+    color: "#fff",
     fontWeight: "bold",
+    fontSize: 12,
+  },
+  habitDesc: {
+    color: "#6c6c80",
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  statsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  statsBadge: {
+    flex: 1,
+    backgroundColor: "#fff3e0",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+  },
+  statsBadgeGold: {
+    flex: 1,
+    backgroundColor: "#fffde7",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+  },
+  statsBadgeGreen: {
+    flex: 1,
+    backgroundColor: "#e8f5e9",
+    borderRadius: 12,
+    padding: 12,
+    alignItems: "center",
+  },
+  statsNumber: {
+    fontWeight: "bold",
+    fontSize: 20,
+    color: "#22223b",
+    marginTop: 4,
+  },
+  statsLabel: {
+    fontSize: 11,
+    color: "#888",
+    marginTop: 4,
+    fontWeight: "500",
   },
 });
-
-export default StreaksScreen;
