@@ -6,9 +6,9 @@ export interface Habit extends Models.Document {
   user_ID: string;
   title: string;
   description: string;
-  frequency: string;
+  frequency: HabitFrequency;
   streak_count: number;
-  last_completed: string | null;
+  last_completed?: string | null;
 }
 
 export interface HabitCompletion extends Models.Document {
@@ -72,7 +72,7 @@ export function isValidFrequency(value: string): value is HabitFrequency {
 if a habit completed today
 */
 
-export function isCompetedToday(habit: Habit): boolean {
+export function isCompletedToday(habit: Habit): boolean {
   if (!habit.last_completed) return false;
 
   const today = new Date().toDateString();
@@ -135,32 +135,39 @@ export function calculateStreak(completions: HabitCompletion[]): StreakData {
 
   let currentStreak = 0,
     longestStreak = 0,
-    tempStreak = 1,
-    previousDate = new Date(sorted[0].completed_at);
+    tempStreak = 1;
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+
   const lastCompletion = new Date(sorted[0].completed_at);
   lastCompletion.setHours(0, 0, 0, 0);
 
-  const daysDiff = Math.floor(
+  const daysSinceLastCompletion = Math.floor(
     (today.getTime() - lastCompletion.getTime()) / (1000 * 60 * 60 * 24),
   );
 
-  if (daysDiff <= 1) {
+  if (daysSinceLastCompletion <= 1) {
     currentStreak = 1;
+    let previousDate = new Date(sorted[0].completed_at);
+    previousDate.setHours(0, 0, 0, 0);
 
     //calculating current streak
 
     for (let i = 1; i < sorted.length; i++) {
       const currentDate = new Date(sorted[i].completed_at);
+      currentDate.setHours(0, 0, 0, 0);
+
       const diffDays = Math.floor(
         (previousDate.getTime() - currentDate.getTime()) /
           (1000 * 60 * 60 * 24),
       );
+
       if (diffDays === 1) {
         currentStreak++;
         previousDate = currentDate;
+      } else if (diffDays === 0) {
+        continue;
       } else {
         break;
       }
@@ -169,24 +176,35 @@ export function calculateStreak(completions: HabitCompletion[]): StreakData {
 
   // calculating longest streak
 
+  let scanPrevDate = new Date(sorted[0].completed_at);
+  scanPrevDate.setHours(0, 0, 0, 0);
+
   for (let i = 1; i < sorted.length; i++) {
-    const currentDate = new Date(sorted[i].completed_at);
+    const scanCurrDate = new Date(sorted[i].completed_at);
+    scanCurrDate.setHours(0, 0, 0, 0);
+
     const diffDays = Math.floor(
-      (previousDate.getTime() - currentDate.getTime()) / (1000 * 60 * 60 * 24),
+      (scanPrevDate.getTime() - scanCurrDate.getTime()) / (1000 * 60 * 60 * 24),
     );
 
     if (diffDays === 1) {
+      // Consecutive day
       tempStreak++;
+    } else if (diffDays === 0) {
+      // Same day - skip
+      continue;
     } else {
+      // Gap - record streak and reset
       longestStreak = Math.max(longestStreak, tempStreak);
       tempStreak = 1;
     }
-    previousDate = currentDate;
+
+    scanPrevDate = scanCurrDate;
   }
   longestStreak = Math.max(longestStreak, tempStreak);
 
   return {
-    currentStreak: Math.max(currentStreak, longestStreak),
+    currentStreak,
     longestStreak,
     totalCompletions: completions.length,
     lastCompletedDate: sorted[0].completed_at,

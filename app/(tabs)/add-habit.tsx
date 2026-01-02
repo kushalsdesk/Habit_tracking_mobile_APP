@@ -2,7 +2,6 @@ import { COLLECTION_ID, DATABASE_ID, databases } from "@/lib/appwrite";
 import { useAuth } from "@/lib/authContext";
 import {
   CreateHabitPayload,
-  Habit,
   HabitFrequency,
   validateHabitPayload,
 } from "@/types/database.type";
@@ -54,6 +53,7 @@ const AddHabitScreen = () => {
     const validation = validateHabitPayload(payload);
     if (!validation.valid) {
       setError(validation.error || "Invalid Input");
+      return;
     }
 
     setError("");

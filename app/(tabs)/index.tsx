@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
   },
   swipeActionLeft: {
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: "flex-start",
     flex: 1,
     backgroundColor: "#e53935",
     borderRadius: 16,
@@ -434,7 +434,7 @@ const styles = StyleSheet.create({
   },
   swipeActionRight: {
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: "flex-end",
     flex: 1,
     backgroundColor: "#4caf50",
     borderRadius: 16,

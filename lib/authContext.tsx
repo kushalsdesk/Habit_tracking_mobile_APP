@@ -102,7 +102,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         };
       }
       return {
-        message: "An error occured while signing in. Please try again.",
+        message: "An error occurred while signing in. Please try again.",
       };
     }
   };
